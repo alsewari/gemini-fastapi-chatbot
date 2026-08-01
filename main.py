@@ -542,7 +542,7 @@ def home() -> str:
 <body>
     <main class="app">
         <header>
-            <h1>Gemini FastAPI Chat</h1>
+            <h1>Sewari API Chat</h1>
             <p>Ask a question or upload files for Gemini to analyse.</p>
         </header>
 
