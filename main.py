@@ -1,10 +1,4 @@
-from pathlib import Path
-import textwrap, zipfile, json, os, py_compile
-
-base = Path("/mnt/data/gemini-fastapi-file-upload")
-base.mkdir(parents=True, exist_ok=True)
-
-main_py = r'''import asyncio
+import asyncio
 import mimetypes
 import os
 import tempfile
@@ -22,17 +16,9 @@ load_dotenv()
 
 API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-
 MAX_FILES = int(os.getenv("MAX_FILES", "5"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "25"))
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-
-if not API_KEY:
-    raise RuntimeError(
-        "GEMINI_API_KEY is missing. Add it to your .env file before starting the API."
-    )
-
-client = genai.Client(api_key=API_KEY)
 
 app = FastAPI(
     title="Gemini Chat API",
@@ -61,12 +47,20 @@ class ChatResponse(BaseModel):
     uploaded_files: list[str] = Field(default_factory=list)
 
 
+def get_gemini_client() -> Any:
+    if not API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not configured. Add it to your .env file first.",
+        )
+    return genai.Client(api_key=API_KEY)
+
+
 def detect_mime_type(file: UploadFile) -> str:
     """Return the best available MIME type for an uploaded file."""
     filename = Path(file.filename or "upload").name
     mime_type = file.content_type or mimetypes.guess_type(filename)[0]
 
-    # Some browsers send text-based files as application/octet-stream.
     text_extensions = {
         ".txt",
         ".md",
@@ -184,6 +178,7 @@ async def save_upload_temporarily(upload: UploadFile) -> Path:
 
 async def wait_until_file_ready(file_resource: Any) -> Any:
     """Wait until Gemini finishes processing an uploaded file."""
+    client = get_gemini_client()
     for _ in range(60):
         state = str(getattr(file_resource, "state", "") or "").upper()
 
@@ -207,6 +202,7 @@ async def wait_until_file_ready(file_resource: Any) -> Any:
 
 async def upload_file_to_gemini(upload: UploadFile) -> tuple[dict[str, str], str]:
     """Upload one FastAPI file to Gemini and return its interaction input block."""
+    client = get_gemini_client()
     filename = Path(upload.filename or "upload").name
     mime_type = detect_mime_type(upload)
     validate_mime_type(mime_type, filename)
@@ -251,6 +247,7 @@ async def create_gemini_response(
     previous_interaction_id: str | None,
     uploaded_files: list[str] | None = None,
 ) -> ChatResponse:
+    client = get_gemini_client()
     create_args: dict[str, Any] = {
         "model": MODEL,
         "input": input_data,
@@ -351,7 +348,6 @@ async def chat_with_files(
     input_blocks: list[dict[str, str]] = []
     uploaded_names: list[str] = []
 
-    # Put files before the prompt so Gemini receives the media context first.
     for upload in uploaded:
         file_block, filename = await upload_file_to_gemini(upload)
         input_blocks.append(file_block)
@@ -720,82 +716,3 @@ if __name__ == "__main__":
         port=int(os.getenv("PORT", "8000")),
         reload=True,
     )
-'''
-
-requirements = """fastapi
-uvicorn[standard]
-google-genai>=2.3.0
-python-dotenv
-python-multipart
-"""
-
-env_example = """GEMINI_API_KEY=YOUR_GOOGLE_GEMINI_API_KEY
-GEMINI_MODEL=gemini-3.5-flash-lite
-MAX_FILES=5
-MAX_FILE_SIZE_MB=25
-"""
-
-dockerfile = """FROM python:3.13-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \\
-    PYTHONUNBUFFERED=1
-
-WORKDIR /app
-
-COPY requirements.txt .
-
-RUN pip install --no-cache-dir --upgrade pip \\
-    && pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-RUN useradd --create-home appuser \\
-    && chown -R appuser:appuser /app
-
-USER appuser
-
-EXPOSE 8000
-
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
-"""
-
-dockerignore = """.env
-.git
-.gitignore
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.venv/
-venv/
-.idea/
-.vscode/
-"""
-
-gitignore = """.env
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.venv/
-venv/
-.idea/
-.vscode/
-"""
-
-readme = """# Gemini FastAPI Chatbot with File Uploads
-
-This FastAPI project supports:
-
-- Normal text chat through `POST /api/chat`
-- File-assisted chat through `POST /api/chat/files`
-- Multiple file uploads
-- PDFs, text, CSV, JSON, Markdown, HTML, XML, images, audio, and video
-- Server-side conversation continuation with `previous_interaction_id`
-- Browser chat interface and Swagger UI
-- Docker
-
-## Install
-
-```bash
-python -m pip install -r requirements.txt
