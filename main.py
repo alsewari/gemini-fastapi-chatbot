@@ -371,7 +371,7 @@ def home() -> str:
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sewari ai chat using Gemini</title>
+    <title>Sewari ai chatbot using Gemini</title>
     <style>
         * {{ box-sizing: border-box; }}
 
